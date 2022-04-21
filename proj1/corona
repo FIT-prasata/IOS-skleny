@@ -1,0 +1,640 @@
+#!/bin/bash
+export POSIXLY_CORRECT=yes
+
+#final version3
+
+function filters(){
+    s_used=0
+    date_valid=0
+    g_used=0
+    bdate_used=0
+    adate_used=0
+    s_width=0
+    while getopts "ha:b:g:s" arg; do
+        case $arg in
+            h)
+                help
+                exit 1
+                ;;
+            a)
+                datea="$OPTARG"
+                datetime_validate $datea
+                if [[ date_valid -eq 0 ]]
+                then
+                    echo "Wrong date inputed" 1>&2
+                    exit 1
+                fi
+                adate_used=1
+                ;;
+            b)
+                dateb="$OPTARG"
+                datetime_validate $dateb
+                if [[ date_valid -eq 0 ]]
+                then
+                    echo "Wrong date inputed" 1>&2
+                    exit 1
+                fi
+                bdate_used=1
+                ;;
+            g)
+                gender_validate $OPTARG
+                gender_used=$OPTARG
+                g_used=1
+                ;;
+            s)
+                eval nextopt=\${$OPTIND}
+                if [[ $nextopt =~ ^[0-9]+$ && $nextopt -gt 0 ]]
+                then
+                    s_width=$nextopt
+                    OPTIND=$((OPTIND+1))
+                else
+                    s_width=0
+                fi
+                s_used=1
+                ;;
+        esac
+    done
+    shift "$(($OPTIND - 1))"
+    rest_of_arguments $@
+}
+
+
+function input_filter(){
+    data=$(echo "$data" | sed 's/ //g' | sed '/^[[:space:]]*$/d')
+
+    wrong_lines=$(echo "$data" | awk -F, '{
+        if (NR > 1){
+            if ($2 != ""){
+                if ($2 ~ /^[0-9]{4}-(02-(0[1-9]|1[0-9]|2[0-8])|(0[13578]|1[02])-(0[1-9]|[12][0-9]|3[01])|(0[469]|11)-(0[1-9]|[12][0-9]|30))+$/){}
+                else{
+                    print "Invalid date: "$0
+                }
+            }
+
+            if ($3 != ""){
+                if ($3 ~ /^[0-9]+$/){}
+                else{
+                    print "Invalid age: "$0
+                }
+            }
+        }
+    }')
+    
+
+    data=$(echo "$data" | awk -F, -v g_used=$g_used -v adate_used=$adate_used -v bdate_used=$bdate_used -v gender_used=$gender_used -v datea=$datea -v dateb=$dateb '
+    {
+        if (NR > 1){
+            if (adate_used == 1){
+                if (datea > $2){
+                    next
+                }
+            }
+            if (bdate_used == 1){
+                if (dateb < $2){
+                    next
+                }
+            }
+            if (g_used == 1){
+                if (gender_used != $4){
+                    next
+                }
+            }
+
+            if ($2 != ""){
+                if ($2 ~ /^[0-9]{4}-(02-(0[1-9]|1[0-9]|2[0-8])|(0[13578]|1[02])-(0[1-9]|[12][0-9]|3[01])|(0[469]|11)-(0[1-9]|[12][0-9]|30))+$/){}
+                else{
+                    next
+                }
+            }
+            if ($3 != ""){
+                if ($3 ~ /^[0-9]+$/){}
+                else{
+                    next
+                }
+            }     
+        }
+        else{
+            
+                print substr($0, 2)
+                next
+            
+        }
+        
+        print $0
+    }
+    ')
+}
+
+function help(){
+    echo "Usage: corona [-h] [FILTERS] [COMMAND] [LOG [LOG2 [...]]]"
+    echo "Analyzes, filters and displays statistics of Covid-19 patients in Czech Republic"
+    echo ""
+    echo "-h : Displays this help page"
+    echo ""
+    echo "FILTERS: can accept any number of following optional arguments"
+    echo "  -a DATETIME: filters input data to show only records AFTER given date (including given date); format: YYYY-MM-DD"
+    echo "  -b DATETIME: filters input data to show only records BEFORE given date (including given date); format: YYYY-MM-DD"
+    echo "  -g GENDER: filters input data to show only records of people of given gender; valid values: M/Z (M = male, Z = female)"
+    echo "  -s [WIDTH]: show output data in histograms; WIDTH is optional parameter to adjust width of histograms and has to be greater than zero, if its lower than zero default WIDTH is used"
+    echo ""
+    echo "COMMAND: can accept only one of following optional arguments"
+    echo "  infected: counts and displays number of infected people"
+    echo "  merge: merges and displays multiple files together"
+    echo "  gender: displays number of infected people by gender"
+    echo "  age: displays number of infected people by age"
+    echo "  daily: displays statistics of infected people by days"
+    echo "  monthly: displays statistics of infected people by months"
+    echo "  yearly: displays statistics of infected people by years"
+    echo "  countries: displays statistics of infected people by countries where they been infected"
+    echo "  districts: displays statistics of infected people by districts"
+    echo "  regions: displays statistics of infected people by regions"
+    echo ""
+    echo "[LOG [LOG2 [...]]]: *.csv / *.csv.gz / *.csv.bz2 files"
+}
+
+function gender_validate(){
+    gend=$1
+    if [[ $gend == 'M' || $gend == 'Z' ]]
+    then
+        :
+    else
+        echo "Wrong gender inputed" 1>&2
+        exit 1
+    fi
+}
+
+function datetime_validate(){
+    date_valid=0
+    if [[ $1 =~ ^[0-9]{4}-(02-(0[1-9]|1[0-9]|2[0-8])|(0[13578]|1[02])-(0[1-9]|[12][0-9]|3[01])|(0[469]|11)-(0[1-9]|[12][0-9]|30))$ ]]
+    then
+        date_valid=1
+    fi
+}
+
+
+
+
+
+function unzip_file(){
+    if (file $1 | grep -q gzip)
+    then
+        temp_data=$(zcat $1)
+    elif (file $1 | grep -q bzip2)
+    then
+        temp_data=$(bzcat $1)
+    else
+        echo "Wrong compress format" 1>&2
+        exit 1
+    fi
+}
+
+function rest_of_arguments(){
+    num_files=0
+    command=""
+    for i in $@
+    do
+        if [[ $i = "infected" || $i = "gender" || $i = "merge" || $i = "age" || $i = "daily" || $i = "monthly" || $i = "yearly" || $i = "countries" || $i = "districts" || $i = "regions" ]]
+        then
+            command=$i
+        elif [[ -f $i ]]
+        then
+            num_files=$((num_files + 1))
+            if (file $i | grep -q compressed)
+            then
+                unzip_file $i
+            else
+                temp_data=$(cat $i)
+            fi
+            if [[ num_files -ne 1 ]]
+            then
+                temp_data=$(echo "$temp_data" | sed '1d')
+                data=$data$'\n'$temp_data
+            else
+                data=$temp_data
+            fi
+        else
+            echo "Wrong command or non-existing file passed as an argument" 1>&2
+            exit 1
+        fi
+    done
+    if [[ $num_files -eq 0 ]]
+    then
+        data=$(cat)
+    fi
+}
+
+
+function infected_fce(){
+    echo "$data" | awk 'END{print NR-1}'
+}
+
+function gender_fce(){
+    if [[ s_width -eq 0 ]]
+        then
+            s_width=100000
+        fi
+        echo "$data" | awk -F, 'BEGIN {male_count=0
+                                        fe_count=0
+                                        no_data=0}
+                                        { if(NR != 1){
+                                            if ($4 == "M"){male_count++}
+                                         else if ($4 == "Z"){fe_count++}
+                                         else {no_data++}}}
+                                        END { if ('$s_used'==0){ 
+                                            print "M: " male_count
+                                            print "Z: " fe_count
+                                            if (no_data != 0){
+                                                print "None: " no_data}
+                                            }
+                                            else {
+                                                male_hist=sprintf("%"(int(male_count/'$s_width'))"s", ""); gsub(" ", "#", male_hist); print "M: " male_hist
+                                                fe_hist=sprintf("%"(int(fe_count/'$s_width'))"s", ""); gsub(" ", "#", fe_hist); print "Z: " fe_hist
+                                                if (no_data != 0){
+                                                    none_hist=sprintf("%"(int(no_data/'$s_width'))"s", ""); gsub(" ", "#", none_hist); print "None: " none_hist
+                                                }                                            
+                                            }}'
+}
+
+function age_fce(){
+    if [[ s_width -eq 0 ]]
+        then
+            s_width=10000
+        fi
+        echo "$data" | awk -F, 'BEGIN {age0_5=0
+                                        age6_15=0
+                                        age16_25=0
+                                        age26_35=0
+                                        age36_45=0
+                                        age46_55=0
+                                        age56_65=0
+                                        age66_75=0
+                                        age76_85=0
+                                        age86_95=0
+                                        age96_105=0
+                                        age105=0
+                                        no_data=0}
+                                        { if(NR != 1){
+                                            if ($3 >= 0 && $3 <= 5){age0_5++}
+                                         else if ($3 >= 6 && $3 <= 15){age6_15++}
+                                         else if ($3 >= 16 && $3 <= 25){age16_25++}
+                                         else if ($3 >= 26 && $3 <= 35){age26_35++}
+                                         else if ($3 >= 36 && $3 <= 45){age36_45++}
+                                         else if ($3 >= 46 && $3 <= 55){age46_55++}
+                                         else if ($3 >= 56 && $3 <= 65){age56_65++}
+                                         else if ($3 >= 66 && $3 <= 75){age66_75++}
+                                         else if ($3 >= 76 && $3 <= 85){age76_85++}
+                                         else if ($3 >= 86 && $3 <= 95){age86_95++}
+                                         else if ($3 >= 96 && $3 <= 105){age96_105++}
+                                         else if ($3 >= 105){age105++}
+                                         else {no_data++}}}
+                                        END { if ('$s_used'==0){ 
+                                            print "0-5   : " age0_5
+                                            print "6-15  : " age6_15
+                                            print "16-25 : " age16_25
+                                            print "26-35 : " age26_35
+                                            print "36-45 : " age36_45
+                                            print "46-55 : " age46_55
+                                            print "56-65 : " age56_65
+                                            print "66-75 : " age66_75
+                                            print "76-85 : " age76_85
+                                            print "86-95 : " age86_95
+                                            print "96-105: " age96_105
+                                            print ">105  : " age105
+                                            if (no_data != 0){
+                                                print "None  : " no_data}
+                                            }
+                                            else {
+                                                age0_5hist=sprintf("%"(int(age0_5/'$s_width'))"s", ""); gsub(" ", "#", age0_5hist); print "0-5   : " age0_5hist
+                                                age6_15hist=sprintf("%"(int(age6_15/'$s_width'))"s", ""); gsub(" ", "#", age6_15hist); print "6-15  : " age6_15hist
+                                                age16_25hist=sprintf("%"(int(age16_25/'$s_width'))"s", ""); gsub(" ", "#", age16_25hist); print "16-25 : " age16_25hist
+                                                age26_35hist=sprintf("%"(int(ag26_35/'$s_width'))"s", ""); gsub(" ", "#", age26_35hist); print "26-35 : " age26_35hist
+                                                age36_45hist=sprintf("%"(int(age36_45/'$s_width'))"s", ""); gsub(" ", "#", age36_45hist); print "36-45 : " age36_45hist
+                                                age46_55hist=sprintf("%"(int(age46_55/'$s_width'))"s", ""); gsub(" ", "#", age46_55hist); print "46-55 : " age46_55hist
+                                                age56_65hist=sprintf("%"(int(age56_65/'$s_width'))"s", ""); gsub(" ", "#", age56_65hist); print "56-65 : " age56_65hist
+                                                age66_75hist=sprintf("%"(int(age66_75/'$s_width'))"s", ""); gsub(" ", "#", age66_75hist); print "66-75 : " age66_75hist
+                                                age76_85hist=sprintf("%"(int(age76_85/'$s_width'))"s", ""); gsub(" ", "#", age76_85hist); print "76-85 : " age76_85hist
+                                                age86_95hist=sprintf("%"(int(age86_95/'$s_width'))"s", ""); gsub(" ", "#", age86_95hist); print "86-95 : " age86_95hist
+                                                age96_105hist=sprintf("%"(int(age96_105/'$s_width'))"s", ""); gsub(" ", "#", age96_105hist); print "96-105: " age96_105hist
+                                                age105hist=sprintf("%"(int(age105/'$s_width'))"s", ""); gsub(" ", "#", age105hist); print ">105  : " age105hist
+                                                if (no_data != 0){
+                                                    none_hist=sprintf("%"(int(no_data/'$s_width'))"s", ""); gsub(" ", "#", none_hist); print "None  : " none_hist
+                                                }
+                                            }}'
+}
+
+function daily_fce(){
+    if [[ s_width -eq 0 ]]
+        then
+            s_width=500
+        fi
+    echo "$data" | tail -n+2 | sort -t',' -k2 | awk -F, '{print $2}' | awk -F- 'BEGIN{count=1
+                                                                                        }
+                                                                            {
+                                                                                if (NR == 1){
+                                                                                    tday=$3
+                                                                                    tmonth=$2
+                                                                                    tyear=$1
+
+                                                                                }
+                                                                                else{
+                                                                                    if ($3 == tday && $2 == tmonth && $1 == tyear){
+                                                                                        count++
+                                                                                        
+                                                                                    }
+                                                                                    else if ($1 == ""){
+                                                                                        no_data++
+                                                                                    }
+                                                                                    else{
+                                                                                        if ('$s_used'==0){
+                                                                                            print tyear"-"tmonth"-"tday": "count
+                                                                                            count=1
+                                                                                        }
+                                                                                        else{
+                                                                                            daily_hist=sprintf("%"(int(count/'$s_width'))"s", ""); gsub(" ", "#", daily_hist); print tyear"-"tmonth"-"tday": "daily_hist
+                                                                                            count=1
+                                                                                        }
+                                                                                    }
+                                                                                    tday=$3
+                                                                                    tmonth=$2
+                                                                                    tyear=$1
+                                                                                }
+                                                                                
+                                                                            }
+                                                                            END{
+                                                                                    if ('$s_used'==0){
+                                                                                            print tyear"-"tmonth"-"tday": "count
+                                                                                            if (no_data != 0){
+                                                                                                print "None: "no_data
+                                                                                            }
+                                                                                        }
+                                                                                        else{
+                                                                                            daily_hist=sprintf("%"(int(count/'$s_width'))"s", ""); gsub(" ", "#", daily_hist); print tyear"-"tmonth"-"tday": "daily_hist
+                                                                                            if (no_data != 0){
+                                                                                                none_hist=sprintf("%"(int(no_data/'$s_width'))"s", ""); gsub(" ", "#", none_hist); print "None: " none_hist
+                                                                                            }                               
+                                                                                        }
+                                                                                }'
+}
+
+function monthly_fce(){
+    if [[ s_width -eq 0 ]]
+        then
+            s_width=10000
+        fi
+    echo "$data" | tail -n+2 | sort -t',' -k2 | awk -F, '{print $2}' | awk -F- 'BEGIN{count=1
+                                                                                        }
+                                                                            {
+                                                                                if (NR == 1){
+                                                                                    tmonth=$2
+                                                                                    tyear=$1
+
+                                                                                }
+                                                                                else{
+                                                                                    if ($2 == tmonth && $1 == tyear){
+                                                                                        count++
+                                                                                        
+                                                                                    }
+                                                                                    else if ($1 == ""){
+                                                                                        no_data++
+                                                                                    }
+                                                                                    else{
+                                                                                        if ('$s_used'==0){
+                                                                                            print tyear"-"tmonth": "count
+                                                                                            count=1
+                                                                                        }
+                                                                                        else{
+                                                                                            monthly_hist=sprintf("%"(int(count/'$s_width'))"s", ""); gsub(" ", "#", monthly_hist); print tyear"-"tmonth": "monthly_hist
+                                                                                            count=1
+                                                                                        }
+                                                                                    }
+                                                                                    tmonth=$2
+                                                                                    tyear=$1
+                                                                                }
+                                                                                
+                                                                            }
+                                                                            END{
+                                                                                    if ('$s_used'==0){
+                                                                                            print tyear"-"tmonth": "count
+                                                                                            if (no_data != 0){
+                                                                                                print "None: "no_data
+                                                                                            }
+                                                                                        }
+                                                                                        else{
+                                                                                            monthly_hist=sprintf("%"(int(count/'$s_width'))"s", ""); gsub(" ", "#", monthly_hist); print tyear"-"tmonth": "monthly_hist
+                                                                                            if (no_data != 0){
+                                                                                                none_hist=sprintf("%"(int(no_data/'$s_width'))"s", ""); gsub(" ", "#", none_hist); print "None: " none_hist
+                                                                                            }   
+                                                                                        }
+                                                                                }'
+}
+
+function yearly_fce(){
+    if [[ s_width -eq 0 ]]
+        then
+            s_width=100000
+        fi
+    echo "$data" | tail -n+2 | sort -t',' -k2 | awk -F, '{print $2}' | awk -F- 'BEGIN{count=1
+                                                                                        }
+                                                                            {
+                                                                                if (NR == 1){
+                                                                                    tyear=$1
+
+                                                                                }
+                                                                                else{
+                                                                                    if ($1 == tyear){
+                                                                                        count++
+                                                                                        
+                                                                                    }
+                                                                                    else if ($1 == ""){
+                                                                                        no_data++
+                                                                                    }
+                                                                                    else{
+                                                                                        if ('$s_used'==0){
+                                                                                            print tyear": "count
+                                                                                            count=1
+                                                                                        }
+                                                                                        else{
+                                                                                            yearly_hist=sprintf("%"(int(count/'$s_width'))"s", ""); gsub(" ", "#", yearly_hist); print tyear": "yearly_hist
+                                                                                            count=1
+                                                                                        }
+                                                                                    }
+                                                                                    tyear=$1
+                                                                                }
+                                                                                
+                                                                            }
+                                                                            END{
+                                                                                    if ('$s_used'==0){
+                                                                                            print tyear": "count
+                                                                                            if (no_data != 0){
+                                                                                                print "None: "no_data
+                                                                                            }
+                                                                                        }
+                                                                                        else{
+                                                                                            yearly_hist=sprintf("%"(int(count/'$s_width'))"s", ""); gsub(" ", "#", yearly_hist); print tyear": "yearly_hist
+                                                                                            if (no_data != 0){
+                                                                                                none_hist=sprintf("%"(int(no_data/'$s_width'))"s", ""); gsub(" ", "#", none_hist); print "None: " none_hist
+                                                                                            }   
+                                                                                        }
+                                                                                }'
+}
+
+function districts_fce(){
+    if [[ s_width -eq 0 ]]
+        then
+            s_width=1000
+        fi
+    echo "$data" | tail -n+2 | awk -F, '{array[$6]++}
+                                                            END{
+                                                                if ('$s_used'==0){
+                                                                    for (i in array){
+                                                                        if (i == ""){
+                                                                            if (array[i] != 0){
+                                                                                print "None: "array[i]
+                                                                            }
+                                                                        }
+                                                                        else{
+                                                                            print i": "array[i]
+                                                                        }
+                                                                    }
+                                                                }
+                                                                else{
+                                                                    for (i in array){
+                                                                        if (i == ""){
+                                                                            if (array[i] != 0){
+                                                                                hist=sprintf("%"(int(array[i]/'$s_width'))"s", ""); gsub(" ", "#", hist); print "None: "hist
+                                                                            }
+                                                                        }
+                                                                        else{
+                                                                            
+                                                                            hist=sprintf("%"(int(array[i]/'$s_width'))"s", ""); gsub(" ", "#", hist); print i": "hist
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }' | sort -g
+}
+
+function regions_fce(){
+    if [[ s_width -eq 0 ]]
+        then
+            s_width=10000
+        fi
+    echo "$data" | tail -n+2 | awk -F, '{array[$5]++}
+                                                            END{
+                                                                if ('$s_used'==0){
+                                                                    for (i in array){
+                                                                        if (i == ""){
+                                                                            if (array[i] != 0){
+                                                                                print "None: "array[i]
+                                                                            }
+                                                                        }
+                                                                        else{
+                                                                            print i": "array[i]
+                                                                        }
+                                                                    }
+                                                                }
+                                                                else{
+                                                                    for (i in array){
+                                                                        if (i == ""){
+                                                                            
+                                                                            if (array[i] != 0){
+                                                                                hist=sprintf("%"(int(array[i]/'$s_width'))"s", ""); gsub(" ", "#", hist); print "None: "hist
+                                                                            }
+                                                                        }
+                                                                        else{
+                                                                            
+                                                                            hist=sprintf("%"(int(array[i]/'$s_width'))"s", ""); gsub(" ", "#", hist); print i": "hist
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }' | sort -g
+}
+
+function countries_fce(){
+    if [[ s_width -eq 0 ]]
+        then
+            s_width=100
+        fi
+    echo "$data" | tail -n+2 | awk -F, -v swidth=$s_width '{array[$8]++}
+                                                            END{
+                                                                if ('$s_used'==0){
+                                                                    for (i in array){
+                                                                        if (i != ""){
+                                                                            print i": "array[i]
+                                                                        }
+                                                                    }
+                                                                }
+                                                                else{
+                                                                    for (i in array){
+                                                                        if (i != ""){
+                                                                            number = int(array[i]/swidth)
+                                                                            printf("%s: ", i)
+                                                                            for (i=0; i < number; i++){
+                                                                                printf("#")
+                                                                            }
+                                                                            printf("\n")
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }' | sort
+}
+
+function process_command(){
+    case $1 in
+    infected)
+        infected_fce
+        ;;
+    merge)
+        echo "$data"
+        ;;
+    gender)
+        gender_fce
+        ;;
+    age)
+        age_fce
+        ;;
+    daily)
+        daily_fce
+        ;;
+    monthly)
+        monthly_fce
+        ;;
+    yearly)
+        yearly_fce
+        ;;
+    countries)
+        countries_fce
+        ;;
+    districts)
+        districts_fce
+        ;;
+    regions)
+        regions_fce
+        ;;
+    esac
+}
+
+
+
+
+function main(){
+    filters $@
+    input_filter
+    process_command $command
+    #echo "command: $command"
+    if [[ $command == "" && $data != "" ]]
+    then
+        echo "$data"
+    fi
+    if [[ $wrong_lines != "" ]]
+    then
+        echo "$wrong_lines" 1>&2
+    fi
+    if [[ $data == "" ]]
+    then
+        echo "id,datum,vek,pohlavi,kraj_nuts_kod,okres_lau_kod,nakaza_v_zahranici,nakaza_zeme_csu_kod,reportovano_khs"
+    fi
+
+}
+
+
+main $@
