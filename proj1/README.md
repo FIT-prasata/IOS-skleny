@@ -1,5 +1,8 @@
 # Project 1
 
+evaulation: 13/15
+- -1 point because of application of patch to reformate output
+
 Script for analyzing COVID-19 cases in Czech republic
 
 ## Usage
