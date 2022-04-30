@@ -36,10 +36,10 @@ sem_t *printing_sem = NULL;
 sem_t *barrier_mut_sem = NULL;
 
 //Variables
-int *IDO_count, *IDH_count, *molecule_count, *count, *barrier_count, *max_molecules;
+int *IDO_count, *IDH_count, *molecule_count, *count, *barrier_count, *max_molecules, *IDO_left, *IDH_left, *all_created;
 
 //Shared memory
-int shm_IDO, shm_IDH, shm_molecule, shm_count, shm_barrier_count, shm_max_molecules;
+int shm_IDO, shm_IDH, shm_molecule, shm_count, shm_barrier_count, shm_max_molecules, shm_IDO_left, shm_IDH_left, shm_all_created;
 
 // Function prototypes
 void process_args(int argc, const char **argv, args_t *args);
