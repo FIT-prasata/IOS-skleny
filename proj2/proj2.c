@@ -8,6 +8,43 @@
 
 #include "proj2.h"
 
+
+//remove before submitting!!
+void print_semaphore_values(){
+    int mutex_sem_val;
+    int barrier_turn_sem_val;
+    int barrier_turn_sem2_val;
+    int oxy_sem_val;
+    int hydro_sem_val;
+    int barrier_mut_sem_val;
+    int printing_sem_val;
+    sem_getvalue(mutex_sem, &mutex_sem_val);
+    sem_getvalue(barrier_turn_sem, &barrier_turn_sem_val);
+    sem_getvalue(barrier_turn2_sem, &barrier_turn_sem2_val);
+    sem_getvalue(oxy_sem, &oxy_sem_val);
+    sem_getvalue(hydro_sem, &hydro_sem_val);
+    sem_getvalue(barrier_mut_sem, &barrier_mut_sem_val);
+    sem_getvalue(printing_sem, &printing_sem_val);
+    printf("\n\tmutex_sem: %i\n", mutex_sem_val);
+    printf("\tbarrier_turn_sem: %i\n", barrier_turn_sem_val);
+    printf("\tbarrier_turn2_sem: %i\n", barrier_turn_sem2_val);
+    printf("\toxy_sem: %i\n", oxy_sem_val);
+    printf("\thydro_sem: %i\n", hydro_sem_val);
+    printf("\tbarrier_mut_sem: %i\n", barrier_mut_sem_val);
+    printf("\tprinting_sem: %i\n\n", printing_sem_val);
+}
+
+
+void cnt_max_molecules(args_t args){
+    if (args.NO > (args.NH / 2)) {
+        *max_molecules = args.NH / 2;
+    }
+    else {
+        *max_molecules = args.NO;
+    }
+}
+
+
 void process_args(int argc, const char **argv, args_t *args){
     char *tmp = "";
 
@@ -40,9 +77,11 @@ bool sem_ctor(){
     //mapping memory blocks for semaphores
     if(
         (mutex_sem = mmap(NULL, sizeof(sem_t), PROT_WRITE | PROT_READ, MAP_SHARED | MAP_ANONYMOUS, 0, 0)) == MAP_FAILED || \
-        (barrier_sem = mmap(NULL, sizeof(sem_t), PROT_WRITE | PROT_READ, MAP_SHARED | MAP_ANONYMOUS, 0, 0)) == MAP_FAILED || \
+        (barrier_turn_sem = mmap(NULL, sizeof(sem_t), PROT_WRITE | PROT_READ, MAP_SHARED | MAP_ANONYMOUS, 0, 0)) == MAP_FAILED || \
+        (barrier_turn2_sem = mmap(NULL, sizeof(sem_t), PROT_WRITE | PROT_READ, MAP_SHARED | MAP_ANONYMOUS, 0, 0)) == MAP_FAILED || \
         (oxy_sem = mmap(NULL, sizeof(sem_t), PROT_WRITE | PROT_READ, MAP_SHARED | MAP_ANONYMOUS, 0, 0)) == MAP_FAILED || \
         (hydro_sem = mmap(NULL, sizeof(sem_t), PROT_WRITE | PROT_READ, MAP_SHARED | MAP_ANONYMOUS, 0, 0)) == MAP_FAILED || \
+        (barrier_mut_sem = mmap(NULL, sizeof(sem_t), PROT_WRITE | PROT_READ, MAP_SHARED | MAP_ANONYMOUS, 0, 0)) == MAP_FAILED || \
         (printing_sem = mmap(NULL, sizeof(sem_t), PROT_WRITE | PROT_READ, MAP_SHARED | MAP_ANONYMOUS, 0, 0)) == MAP_FAILED \
     ){
         fprintf(stderr, "ERROR: Problem with semaphores mapping.\n");
@@ -52,9 +91,11 @@ bool sem_ctor(){
     //initializing semaphores
     if(
         sem_init(mutex_sem, 1, 1) == -1 || \
-        sem_init(barrier_sem, 1, 0) == -1 || \
+        sem_init(barrier_turn_sem, 1, 0) == -1 || \
+        sem_init(barrier_turn2_sem, 1, 1) == -1 || \
         sem_init(oxy_sem, 1, 0) == -1 || \
         sem_init(hydro_sem, 1, 0) == -1 || \
+        sem_init(barrier_mut_sem, 1, 1) == -1 || \
         sem_init(printing_sem, 1, 1) == -1
     ){
         fprintf(stderr, "ERROR: Problem with semaphores initialization.\n");
@@ -70,9 +111,11 @@ bool sem_dtor(){
     //destroying of semahores
     if(
         sem_destroy(mutex_sem) == -1 || \
-        sem_destroy(barrier_sem) == -1 || \
+        sem_destroy(barrier_turn_sem) == -1 || \
+        sem_destroy(barrier_turn2_sem) == -1 || \
         sem_destroy(oxy_sem) == -1 || \
         sem_destroy(hydro_sem) == -1 || \
+        sem_destroy(barrier_mut_sem) == -1 || \
         sem_destroy(printing_sem) == -1
     ){
         fprintf(stderr, "ERROR: Problem with destroing semaphores.\n");
@@ -86,6 +129,9 @@ bool shm_ctor(){
     if(
         (shm_IDO = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | 0666)) == -1 || \
         (shm_IDH = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | 0666)) == -1 || \
+        (shm_count = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | 0666)) == -1 || \
+        (shm_barrier_count = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | 0666)) == -1 || \
+        (shm_max_molecules = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | 0666)) == -1 || \
         (shm_molecule = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | IPC_EXCL | 0666)) == -1
     ){
         fprintf(stderr, "ERROR: Problem with allocation of shared memory.\n");
@@ -95,6 +141,9 @@ bool shm_ctor(){
     if(
         (IDO_count = shmat(shm_IDO, NULL, 0)) == NULL || \
         (IDH_count = shmat(shm_IDH, NULL, 0)) == NULL || \
+        (count = shmat(shm_count, NULL, 0)) == NULL || \
+        (barrier_count = shmat(shm_barrier_count, NULL, 0)) == NULL || \
+        (max_molecules = shmat(shm_max_molecules, NULL, 0)) == NULL || \
         (molecule_count = shmat(shm_molecule, NULL, 0)) == NULL
     ){
         fprintf(stderr, "ERROR: Problem with attachment of shared memory.\n");
@@ -109,6 +158,9 @@ bool shm_dtor(){
     if(
         shmctl(shm_IDO, IPC_RMID, NULL) == -1 || \
         shmctl(shm_IDH, IPC_RMID, NULL) == -1 || \
+        shmctl(shm_count, IPC_RMID, NULL) == -1 || \
+        shmctl(shm_barrier_count, IPC_RMID, NULL) == -1 || \
+        shmctl(shm_max_molecules, IPC_RMID, NULL) == -1 || \
         shmctl(shm_molecule, IPC_RMID, NULL) == -1
     ){
         fprintf(stderr, "ERROR: Problem with freeing shared memory.\n");
@@ -119,6 +171,9 @@ bool shm_dtor(){
     if(
         shmdt(IDO_count) == -1 || \
         shmdt(IDH_count) == -1 || \
+        shmdt(count) == -1 || \
+        shmdt(barrier_count) == -1 || \
+        shmdt(max_molecules) == -1 || \
         shmdt(molecule_count) == -1
     ){
         fprintf(stderr, "ERROR: Problem with detaching shared memory.\n");
@@ -140,12 +195,182 @@ void cleanup(){
 }
 
 
-void create_oxygen(int id, args_t *args){
+void create_oxygen(int id, args_t *args, FILE *file){
+    srand(getpid());
+
+    sem_wait(printing_sem);
+    (*count)++;
+    fprintf(stdout, "%i: O %i: started\n", *count, id);
+    sem_post(printing_sem);
+
+    usleep(1000 * (rand() % (args->TI + 1)));
+
+    sem_wait(printing_sem);
+    (*count)++;
+    fprintf(stdout, "%i: O %i: going to queque\n", *count, id);
+    sem_post(printing_sem);
+
+    //creating molecules UNTESTED
+    sem_wait(mutex_sem);
+
+    (*IDO_count)++;
+
+    if(*IDH_count >= 2){
+//        printf("inside start O id: %i\n", id);
+        sem_post(hydro_sem);
+        sem_post(hydro_sem);
+        (*IDH_count)--;
+        (*IDH_count)--;
+        sem_post(oxy_sem);
+        (*IDO_count)--;
+
+        //sem_wait(printing_sem);
+    //print_semaphore_values();
+    //sem_post(printing_sem); 
+
+    }
+    else{
+        sem_post(mutex_sem);
+    }
+//    printf("before sem_wait oxy sem id: %i\n", id);
+    sem_wait(oxy_sem);
+
+    sem_wait(printing_sem);
+    (*count)++;
+    fprintf(stdout, "%i: O %i: creating molecule %i\n", *count, id, (*molecule_count)+1);
+    sem_post(printing_sem);
+
+//    sem_wait(printing_sem);
+//    print_semaphore_values();
+//    sem_post(printing_sem);
+
+    usleep(1000 * (rand() % (args->TB + 1)));
+
+    //create molecule
+
+    //insert barrier here
+    if(*molecule_count != *max_molecules){
+
+        //barrier - implementation based on the book The Little book of semaphores
+        sem_wait(barrier_mut_sem);
+        (*barrier_count)++;
+        if(*barrier_count == 3){
+            sem_wait(barrier_turn2_sem);
+            sem_post(barrier_turn_sem);
+        }
+        sem_post(barrier_mut_sem);
+
+    //    printf("oxy %i waits here.\n", id);
+        sem_wait(barrier_turn_sem);
+    //    printf("oxy %i waits heredfdfdfdf.\n", id);
+        sem_post(barrier_turn_sem);
+
+        sem_wait(printing_sem);
+        (*count)++;
+        fprintf(stdout, "%i: O %i: molecule %i created\n", *count, id, (*molecule_count)+1);
+        sem_post(printing_sem);
+
+        sem_wait(barrier_mut_sem);
+        (*barrier_count)--;
+        if(*barrier_count == 0){
+            sem_wait(barrier_turn_sem);
+            sem_post(barrier_turn2_sem);
+        }
+        sem_post(barrier_mut_sem);
+
+        sem_wait(barrier_turn2_sem);
+        sem_post(barrier_turn2_sem);
+    //    printf("after barrier O id: %i\n", id);
+
+
+        (*molecule_count)++;
+    }
+
+    sem_post(mutex_sem);
     
 }
 
-void create_hydrogen(int id, args_t *args){
+void create_hydrogen(int id, args_t *args, FILE *file){
+    srand(getpid());
 
+    sem_wait(printing_sem);
+    (*count)++;
+    fprintf(stdout, "%i: H %i: started\n", *count, id);
+    sem_post(printing_sem);
+
+    usleep(1000 * (rand() % (args->TI + 1)));
+
+    sem_wait(printing_sem);
+    (*count)++;
+    fprintf(stdout, "%i: H %i: going to queque\n", *count, id);
+    sem_post(printing_sem);
+
+    
+    sem_wait(mutex_sem);
+
+    (*IDH_count)++;
+
+//    printf("close call xd H id: %i\n", id);
+    if(*IDH_count >= 2 && *IDO_count >= 1){
+//        printf("inside start H id: %i\n", id);
+        sem_post(hydro_sem);
+        sem_post(hydro_sem);
+        (*IDH_count)--;
+        (*IDH_count)--;
+        sem_post(oxy_sem);
+        (*IDO_count)--;
+
+    }
+    else{
+        sem_post(mutex_sem);
+    }
+//    printf("before sem_wait hydro sem id: %i\n", id);
+    sem_wait(hydro_sem);
+
+    sem_wait(printing_sem);
+    (*count)++;
+    fprintf(stdout, "%i: H %i: creating molecule %i\n", *count, id,(*molecule_count)+1);
+    sem_post(printing_sem);
+
+//    sem_wait(printing_sem);
+//    print_semaphore_values();
+//    sem_post(printing_sem);
+    //bonding
+
+    if(*molecule_count != *max_molecules){
+    
+        //barrier - implementation based on the book The Little book of semaphores
+        sem_wait(barrier_mut_sem);
+        (*barrier_count)++;
+        if(*barrier_count == 3){
+            sem_wait(barrier_turn2_sem);
+            sem_post(barrier_turn_sem);
+        }
+        sem_post(barrier_mut_sem);
+
+    //    printf("hydro %i waits here.\n", id);
+        sem_wait(barrier_turn_sem);
+    //    printf("hydro %i waits heredfdfdfdf.\n", id);
+        sem_post(barrier_turn_sem);
+
+        sem_wait(printing_sem);
+        (*count)++;
+        fprintf(stdout, "%i: H %i: molecule %i created\n", *count, id, (*molecule_count+1));
+        sem_post(printing_sem);
+
+        sem_wait(barrier_mut_sem);
+        (*barrier_count)--;
+        if(*barrier_count == 0){
+            sem_wait(barrier_turn_sem);
+            sem_post(barrier_turn2_sem);
+        }
+        sem_post(barrier_mut_sem);
+
+        sem_wait(barrier_turn2_sem);
+        sem_post(barrier_turn2_sem);
+
+    }
+//    printf("after barrier H id: %i\n", id);
 }
 
 
@@ -172,6 +397,14 @@ int main(int argc, char const *argv[]){
     sem_ctor(); //problemky s tim když se to posere tak se musí uvolnit asi jen něco, budu se holt modlit ať se to nikdy neposere xd 
     shm_ctor(); //same problémek jako nahoře
 
+    *molecule_count = 0;
+    *IDH_count = 0;
+    *IDO_count = 0;
+    *count = 0;
+    *barrier_count = 0;
+
+    cnt_max_molecules(args);
+
     //initial fork
     init = fork();
     if(init == -1){
@@ -191,7 +424,7 @@ int main(int argc, char const *argv[]){
                 exit(1);
             }
             else if(oxygen_init == 0){
-                //create_oxygen();
+                create_oxygen(i + 1, &args, f);
                 exit(0);
             }
             else{
@@ -214,7 +447,7 @@ int main(int argc, char const *argv[]){
                 exit(1);
             }
             else if(hydrogen_init == 0){
-                //create_hydrogen();
+                create_hydrogen(i + 1, &args, f);
                 exit(0);
             }
             else{
@@ -234,3 +467,7 @@ int main(int argc, char const *argv[]){
     cleanup();
     return 0;
 }
+
+
+
+
