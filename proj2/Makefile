@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-std=gnu99 -Wall -Wextra -pthread -pedantic #add -Werror
+CFLAGS=-std=gnu99 -Wall -Werror -Wextra -pthread -pedantic
 
 all: proj2
 

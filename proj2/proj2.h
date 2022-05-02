@@ -34,6 +34,8 @@ sem_t *oxy_sem = NULL;
 sem_t *hydro_sem = NULL;
 sem_t *printing_sem = NULL;
 sem_t *barrier_mut_sem = NULL;
+sem_t *some_sem = NULL;
+sem_t *mcounter_sem = NULL;
 
 //Variables
 int *IDO_count, *IDH_count, *molecule_count, *count, *barrier_count, *max_molecules, *IDO_left, *IDH_left, *all_created;
