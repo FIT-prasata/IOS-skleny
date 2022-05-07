@@ -1,1 +1,0 @@
-./ios_proj2_test-master/test.py
