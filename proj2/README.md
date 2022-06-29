@@ -1,6 +1,7 @@
 # Project 2
 
 Dihydrogen oxide synthesis process synchronization program
+here is some 
 
 ## How to run
 1. compile with command make
