@@ -1,5 +1,7 @@
 # Project 2
 
+evaulation: 15/15
+
 Dihydrogen oxide synthesis process synchronization program
 here is some 
 
@@ -9,3 +11,5 @@ here is some
 - 4 is a number of oxygens
 - 5 is a number of hydrogens
 - rest is waiting time in miliseconds used to simulate creation of molecules
+
+
